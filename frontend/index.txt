@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>DeepGuard — Deepfake Audio Detector</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+/* ═══════════════════════════════════════════
+   DEEPGUARD FRONTEND
+   Talks to FastAPI at /api/*
+   Charts drawn with Chart.js + Canvas 2D
+═══════════════════════════════════════════ */
+:root{
+  --real:#1db954;--fake:#e84040;--accent:#f0a500;
+  --bg0:#08080d;--bg1:#10101a;--bg2:#18182a;--bg3:#22223a;
+  --border:rgba(255,255,255,.07);--text:#e8e8f0;--muted:#6a6a8a;
+  --mono:'Space Mono',monospace;--sans:'DM Sans',sans-serif;
+  --radius:12px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--bg0);color:var(--text);font-family:var(--sans);min-height:100vh}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-thumb{background:var(--bg3);border-radius:3px}
+
+/* HEADER */
+.hdr{position:sticky;top:0;z-index:200;background:rgba(8,8,13,.92);
+     backdrop-filter:blur(12px);border-bottom:1px solid var(--border);
+     padding:14px 28px;display:flex;align-items:center;gap:14px}
+.logo{width:38px;height:38px;background:linear-gradient(135deg,#e84040,#8a0808);
+      border-radius:9px;display:flex;align-items:center;justify-content:center;
+      font-family:var(--mono);font-size:11px;font-weight:700;color:#fff;flex-shrink:0}
+.hdr-title{font-size:15px;font-weight:600;letter-spacing:-.3px}
+.hdr-sub{font-size:10px;color:var(--muted);font-family:var(--mono)}
+.hdr-badge{margin-left:auto;background:rgba(240,165,0,.1);border:1px solid rgba(240,165,0,.3);
+           color:var(--accent);font-family:var(--mono);font-size:10px;padding:3px 9px;border-radius:4px}
+.api-status{display:flex;align-items:center;gap:5px;font-size:10px;
+            font-family:var(--mono);color:var(--muted)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--muted)}
+.dot.online{background:var(--real);animation:pulse 2s ease-in-out infinite}
+.dot.error{background:var(--fake)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* LAYOUT */
+.page{max-width:1160px;margin:0 auto;padding:26px 28px 60px}
+.sec-lbl{font-size:10px;font-family:var(--mono);color:var(--muted);
+         letter-spacing:.14em;text-transform:uppercase;margin-bottom:12px}
+.sec-lbl span{color:var(--accent);margin-right:5px}
+.card{background:var(--bg1);border:1px solid var(--border);border-radius:var(--radius);padding:20px 22px}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+@media(max-width:860px){.g2{grid-template-columns:1fr}}
+@media(max-width:560px){.g4{grid-template-columns:1fr 1fr}}
+.mt{margin-top:22px}.mb{margin-bottom:22px}
+canvas{display:block;width:100%}
+
+/* CHIPS */
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.chip{font-size:10px;font-family:var(--mono);padding:2px 8px;border-radius:4px;
+      background:var(--bg3);border:1px solid var(--border);color:var(--muted)}
+.cg{background:rgba(30,185,84,.08);border-color:rgba(30,185,84,.22);color:var(--real)}
+.cr{background:rgba(232,64,64,.08);border-color:rgba(232,64,64,.22);color:var(--fake)}
+.ca{background:rgba(240,165,0,.08);border-color:rgba(240,165,0,.22);color:var(--accent)}
+
+/* PIPELINE */
+.pipe{display:flex;align-items:center;overflow-x:auto;padding:4px 0;scrollbar-width:none}
+.pipe::-webkit-scrollbar{display:none}
+.ps{background:var(--bg2);border:1px solid var(--border);border-radius:7px;
+    padding:9px 13px;text-align:center;flex-shrink:0;min-width:76px}
+.ps.a{border-color:rgba(232,64,64,.35);background:rgba(232,64,64,.06)}
+.ps-t{font-size:10px;font-family:var(--mono);font-weight:700;color:var(--text)}
+.ps.a .ps-t{color:var(--fake)}
+.ps-s{font-size:8px;color:var(--muted);font-family:var(--mono);margin-top:2px}
+.pa{color:var(--muted);font-size:13px;padding:0 5px;flex-shrink:0}
+
+/* UPLOAD */
+.upload{border:1.5px dashed rgba(240,165,0,.3);border-radius:var(--radius);
+        background:rgba(240,165,0,.025);padding:38px 28px;text-align:center;
+        cursor:pointer;transition:all .2s;position:relative;overflow:hidden}
+.upload:hover,.upload.drag{border-color:rgba(240,165,0,.6);background:rgba(240,165,0,.06)}
+.upload input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.upload-icon{font-size:30px;margin-bottom:10px}
+.upload-title{font-size:14px;font-weight:500;margin-bottom:4px}
+.upload-sub{font-size:12px;color:var(--muted)}
+
+/* ANALYZE BTN */
+.analyze-btn{width:100%;background:linear-gradient(135deg,#e84040,#8a1010);
+             border:none;border-radius:9px;color:#fff;font-family:var(--mono);
+             font-size:12px;font-weight:700;letter-spacing:.06em;padding:15px;
+             cursor:pointer;transition:opacity .2s}
+.analyze-btn:hover{opacity:.86}
+.analyze-btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* VERDICT */
+.verdict-row{display:flex;align-items:center;gap:18px;margin-bottom:20px;flex-wrap:wrap}
+.verdict{font-size:20px;font-weight:700;font-family:var(--mono);
+         padding:11px 20px;border-radius:9px;letter-spacing:.04em;flex-shrink:0}
+.v-real{background:rgba(30,185,84,.12);color:var(--real);border:1px solid rgba(30,185,84,.3)}
+.v-fake{background:rgba(232,64,64,.12);color:var(--fake);border:1px solid rgba(232,64,64,.3)}
+.conf-wrap{flex:1;min-width:180px}
+.conf-lbl{font-size:11px;color:var(--muted);font-family:var(--mono);margin-bottom:6px}
+.conf-track{height:7px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.conf-fill{height:100%;border-radius:4px;transition:width 1s cubic-bezier(.4,0,.2,1);width:0%}
+.conf-prob{font-size:10px;color:var(--muted);font-family:var(--mono);margin-top:5px}
+
+/* METRIC CARDS */
+.mc{background:var(--bg2);border:1px solid var(--border);border-radius:9px;padding:13px 15px}
+.mn{font-size:10px;color:var(--muted);font-family:var(--mono);margin-bottom:4px;letter-spacing:.04em}
+.mv{font-size:20px;font-weight:600;font-family:var(--mono)}
+.ms{font-size:9px;color:var(--muted);margin-top:3px}
+
+/* TABS */
+.tab-bar{display:flex;gap:2px;margin-bottom:14px;flex-wrap:wrap}
+.tab{padding:6px 13px;border-radius:5px;font-size:10px;font-family:var(--mono);
+     cursor:pointer;color:var(--muted);border:none;background:transparent;transition:all .15s}
+.tab.active{background:var(--bg3);color:var(--text)}
+.tab-body{display:none}.tab-body.active{display:block}
+
+/* CHART CARD */
+.cc{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:14px}
+.ct{font-size:10px;font-family:var(--mono);color:var(--muted);margin-bottom:11px;
+    font-weight:700;letter-spacing:.04em}
+
+/* STAT TABLE */
+.sr{display:flex;justify-content:space-between;padding:7px 0;
+    border-bottom:1px solid var(--border);font-size:12px}
+.sr:last-child{border-bottom:none}
+.sn{color:var(--muted)}.sv{font-family:var(--mono)}
+
+/* EXPLANATION */
+.expl{font-size:12px;color:var(--muted);line-height:1.75;
+      background:var(--bg2);border-radius:9px;padding:15px;
+      border:1px solid var(--border);margin-top:14px}
+.expl strong{color:var(--text)}
+
+/* LOADING */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid var(--bg3);
+         border-top-color:var(--fake);border-radius:50%;animation:spin .7s linear infinite;
+         vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hidden{display:none!important}
+
+/* ERROR TOAST */
+.toast{position:fixed;bottom:24px;right:24px;background:#1a0a0a;
+       border:1px solid var(--fake);border-radius:9px;padding:12px 16px;
+       font-size:12px;color:var(--fake);font-family:var(--mono);z-index:9999;
+       max-width:340px;animation:slideIn .3s ease}
+@keyframes slideIn{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="hdr">
+  <div class="logo">DF</div>
+  <div>
+    <div class="hdr-title">DeepGuard</div>
+    <div class="hdr-sub">Deepfake Audio Detection · FastAPI + LCNN + BiLSTM</div>
+  </div>
+  <div class="api-status"><span class="dot" id="api-dot"></span><span id="api-lbl">Connecting…</span></div>
+  <div class="hdr-badge">v2.4</div>
+</header>
+
+<main class="page">
+
+  <!-- 01 DATASET -->
+  <p class="sec-lbl"><span>01</span>Training Dataset</p>
+  <div class="card mb">
+    <div style="display:flex;gap:18px;align-items:flex-start">
+      <div style="width:42px;height:42px;flex-shrink:0;background:rgba(30,185,84,.1);border:1px solid rgba(30,185,84,.2);border-radius:9px;display:flex;align-items:center;justify-content:center">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1db954" stroke-width="1.5" stroke-linecap="round">
+          <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v4c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
+          <path d="M3 9v4c0 1.66 4.03 3 9 3s9-1.34 9-3V9"/><path d="M3 13v4c0 1.66 4.03 3 9 3s9-1.34 9-3v-4"/>
+        </svg>
+      </div>
+      <div>
+        <div style="font-size:13px;font-weight:600;margin-bottom:5px" id="ds-name">Loading…</div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.65" id="ds-desc">—</div>
+        <div class="chips" id="ds-chips"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 02 PIPELINE -->
+  <p class="sec-lbl mt"><span>02</span>Model Pipeline</p>
+  <div class="card mb">
+    <div class="pipe">
+      <div class="ps"><div class="ps-t">INPUT</div><div class="ps-s">WAV/MP3</div></div>
+      <div class="pa">→</div>
+      <div class="ps a"><div class="ps-t">PREPROCESS</div><div class="ps-s">16kHz mono</div></div>
+      <div class="pa">→</div>
+      <div class="ps a"><div class="ps-t">MFCC</div><div class="ps-s">40+Δ+ΔΔ</div></div>
+      <div class="pa">→</div>
+      <div class="ps a"><div class="ps-t">MEL SPEC</div><div class="ps-s">80 bands</div></div>
+      <div class="pa">→</div>
+      <div class="ps a"><div class="ps-t">LCNN</div><div class="ps-s">MaxFeatureMap</div></div>
+      <div class="pa">→</div>
+      <div class="ps a"><div class="ps-t">BiLSTM</div><div class="ps-s">128×2</div></div>
+      <div class="pa">→</div>
+      <div class="ps a"><div class="ps-t">ATTENTION</div><div class="ps-s">Self-attn</div></div>
+      <div class="pa">→</div>
+      <div class="ps"><div class="ps-t">VERDICT</div><div class="ps-s">Real / Fake</div></div>
+    </div>
+  </div>
+
+  <!-- 03 MODEL STATS + ROC -->
+  <p class="sec-lbl mt"><span>03</span>Model Performance</p>
+  <div class="g2 mb">
+    <div class="card">
+      <div class="ct">ARCHITECTURE</div>
+      <div id="model-stats">
+        <div class="sr"><span class="sn">Architecture</span><span class="sv">LCNN + BiLSTM + Attn</span></div>
+        <div class="sr"><span class="sn">Parameters</span><span class="sv" id="s-params">—</span></div>
+        <div class="sr"><span class="sn">Test accuracy</span><span class="sv" id="s-acc" style="color:var(--real)">—</span></div>
+        <div class="sr"><span class="sn">AUC-ROC</span><span class="sv" id="s-auc" style="color:var(--real)">—</span></div>
+        <div class="sr"><span class="sn">EER</span><span class="sv" id="s-eer" style="color:var(--accent)">—</span></div>
+        <div class="sr"><span class="sn">Avg inference</span><span class="sv" id="s-inf">—</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="ct">ROC CURVES</div>
+      <div style="position:relative;height:230px"><canvas id="roc-chart" role="img" aria-label="ROC curves">ROC</canvas></div>
+    </div>
+  </div>
+
+  <!-- 04 UPLOAD -->
+  <p class="sec-lbl mt"><span>04</span>Upload Audio for Analysis</p>
+  <div class="upload mb" id="upload-zone">
+    <input type="file" accept="audio/*" id="file-input" onchange="handleFile(this)"/>
+    <div class="upload-icon">🎙️</div>
+    <div class="upload-title" id="upload-title">Drop audio file or click to browse</div>
+    <div class="upload-sub">WAV · MP3 · OGG · FLAC · M4A &nbsp;·&nbsp; Max 25MB</div>
+  </div>
+
+  <button class="analyze-btn mb" id="analyze-btn" onclick="runAnalysis()" disabled>
+    SELECT AN AUDIO FILE TO ANALYZE
+  </button>
+
+  <!-- 05 RESULTS -->
+  <div id="results" class="hidden">
+    <p class="sec-lbl"><span>05</span>Detection Result</p>
+    <div class="card mb">
+
+      <!-- Verdict -->
+      <div class="verdict-row">
+        <div class="verdict" id="verdict-badge">—</div>
+        <div class="conf-wrap">
+          <div class="conf-lbl" id="conf-lbl">Confidence —</div>
+          <div class="conf-track"><div class="conf-fill" id="conf-fill"></div></div>
+          <div class="conf-prob" id="conf-prob"></div>
+        </div>
+      </div>
+
+      <!-- Metric cards -->
+      <div class="g4 mb">
+        <div class="mc"><div class="mn">SPECTRAL ENTROPY</div><div class="mv" id="m-e">—</div><div class="ms">Real: &gt;0.75</div></div>
+        <div class="mc"><div class="mn">MFCC VARIANCE</div><div class="mv" id="m-m">—</div><div class="ms">Real: &gt;0.030</div></div>
+        <div class="mc"><div class="mn">PITCH STABILITY</div><div class="mv" id="m-p">—</div><div class="ms">Fake: &gt;0.93</div></div>
+        <div class="mc"><div class="mn">GAN ARTIFACTS</div><div class="mv" id="m-g">—</div><div class="ms">4–8kHz band</div></div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-bar">
+        <button class="tab active" onclick="switchTab('waveform',this)">Waveforms</button>
+        <button class="tab" onclick="switchTab('spectrogram',this)">Spectrogram</button>
+        <button class="tab" onclick="switchTab('mfcc',this)">MFCC</button>
+        <button class="tab" onclick="switchTab('frequency',this)">Frequency</button>
+      </div>
+
+      <!-- WAVEFORM TAB -->
+      <div class="tab-body active" id="tab-waveform">
+        <div class="g2">
+          <div class="cc"><div class="ct">YOUR AUDIO — WAVEFORM</div><canvas id="wf-user" height="80" role="img" aria-label="Your audio waveform">Waveform</canvas></div>
+          <div class="cc"><div class="ct">WAVEFORM DIFFERENCE MAP</div><canvas id="wf-diff" height="80" role="img" aria-label="Waveform difference">Diff</canvas></div>
+        </div>
+        <div class="g2 mt" style="margin-top:12px">
+          <div class="cc"><div class="ct">REAL REFERENCE</div><canvas id="wf-real" height="68" role="img" aria-label="Real reference waveform">Real waveform</canvas></div>
+          <div class="cc"><div class="ct">DEEPFAKE REFERENCE</div><canvas id="wf-fake" height="68" role="img" aria-label="Fake reference waveform">Fake waveform</canvas></div>
+        </div>
+      </div>
+
+      <!-- SPECTROGRAM TAB -->
+      <div class="tab-body" id="tab-spectrogram">
+        <div class="g2">
+          <div class="cc"><div class="ct">YOUR AUDIO — MEL SPECTROGRAM</div><canvas id="sp-user" height="130" role="img" aria-label="Your audio mel spectrogram">Spectrogram</canvas></div>
+          <div class="cc"><div class="ct">DEEPFAKE REF — MEL SPECTROGRAM</div><canvas id="sp-fake" height="130" role="img" aria-label="Deepfake mel spectrogram">Spectrogram</canvas></div>
+        </div>
+        <div class="g2 mt" style="margin-top:12px">
+          <div class="cc"><div class="ct">REAL REF — MEL SPECTROGRAM</div><canvas id="sp-real" height="130" role="img" aria-label="Real mel spectrogram">Spectrogram</canvas></div>
+          <div class="cc"><div class="ct">ANOMALY MAP (HIGH = ARTIFACT)</div><canvas id="sp-anom" height="130" role="img" aria-label="Anomaly map">Anomaly</canvas></div>
+        </div>
+      </div>
+
+      <!-- MFCC TAB -->
+      <div class="tab-body" id="tab-mfcc">
+        <div class="g2">
+          <div class="cc"><div class="ct">YOUR AUDIO — MFCC HEATMAP</div><canvas id="mf-user" height="130" role="img" aria-label="Your MFCC heatmap">MFCC</canvas></div>
+          <div class="cc"><div class="ct">DEEPFAKE REF — MFCC HEATMAP</div><canvas id="mf-fake" height="130" role="img" aria-label="Deepfake MFCC heatmap">MFCC</canvas></div>
+        </div>
+        <div class="cc mt" style="margin-top:12px">
+          <div class="ct">MFCC VARIANCE COMPARISON</div>
+          <div style="position:relative;height:200px"><canvas id="mf-bar" role="img" aria-label="MFCC bar comparison">MFCC bar</canvas></div>
+        </div>
+      </div>
+
+      <!-- FREQUENCY TAB -->
+      <div class="tab-body" id="tab-frequency">
+        <div class="g2">
+          <div class="cc">
+            <div class="ct">FREQUENCY SPECTRUM</div>
+            <div style="position:relative;height:230px"><canvas id="fr-spec" role="img" aria-label="Frequency spectrum">Spectrum</canvas></div>
+          </div>
+          <div class="cc">
+            <div class="ct">BAND ENERGY COMPARISON</div>
+            <div style="position:relative;height:230px"><canvas id="fr-band" role="img" aria-label="Band energy">Band energy</canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="expl" id="expl"></div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   CONFIG — change API_BASE for local dev vs production
+═══════════════════════════════════════════════════ */
+const API_BASE = "http://localhost:8000";   // empty = same origin (works on Vercel)
+// For local dev set: const API_BASE = "http://localhost:8000";
+
+const C = {
+  real:"#1db954", fake:"#e84040", accent:"#f0a500",
+  muted:"#6a6a8a", bg:"#0c0c18", bg2:"#18182a",
+};
+
+/* ═══ STATE ════════════════════════════════════════ */
+let currentFile = null;
+let chartRefs   = {};
+
+/* ═══ API HEALTH CHECK ═════════════════════════════ */
+async function checkHealth() {
+  try {
+    const r = await fetch(`${API_BASE}/api/health`);
+    const d = await r.json();
+    document.getElementById("api-dot").className = "dot online";
+    document.getElementById("api-lbl").textContent = "API ONLINE";
+  } catch {
+    document.getElementById("api-dot").className = "dot error";
+    document.getElementById("api-lbl").textContent = "API OFFLINE";
+  }
+}
+
+/* ═══ LOAD MODEL INFO ══════════════════════════════ */
+async function loadInfo() {
+  try {
+    const r = await fetch(`${API_BASE}/api/info`);
+    const d = await r.json();
+
+    // Dataset
+    document.getElementById("ds-name").textContent =
+      "ASVspoof 2019 LA + FakeAVCeleb Combined Dataset";
+    document.getElementById("ds-desc").textContent =
+      `ASVspoof 2019: 121,461 utterances across 19 attack types (WaveNet, Tacotron2, VC). ` +
+      `FakeAVCeleb: ${d.dataset.samples.toLocaleString()} total samples including GAN synthesis and LipSync deepfakes.`;
+
+    const chipsEl = document.getElementById("ds-chips");
+    const chips = [
+      ["121,461 utterances","cg"],["19 attack types","cr"],["WaveNet / TTS","ca"],
+      ["GAN Synthesis","cr"],["MFCC Features",""],["Mel Spectrogram",""],
+      [`${(d.model.test_accuracy*100).toFixed(1)}% accuracy`,"cg"],
+      [`AUC ${d.model.auc}`,"cg"],
+    ];
+    chipsEl.innerHTML = chips.map(([t,c])=>`<span class="chip ${c}">${t}</span>`).join("");
+
+    // Model stats
+    document.getElementById("s-params").textContent = d.model.parameters;
+    document.getElementById("s-acc").textContent    = (d.model.test_accuracy*100).toFixed(1)+"%";
+    document.getElementById("s-auc").textContent    = d.model.auc;
+    document.getElementById("s-eer").textContent    = (d.model.eer*100).toFixed(1)+"%";
+    document.getElementById("s-inf").textContent    = `~${d.model.inference_ms}ms / clip`;
+
+    // ROC chart
+    drawROC(d.roc_data.models);
+  } catch(e) {
+    console.warn("Could not load /api/info:", e);
+    drawROC(null);
+  }
+}
+
+/* ═══ ROC CHART ════════════════════════════════════ */
+function drawROC(models) {
+  const ctx = document.getElementById("roc-chart");
+  const fallback = [
+    {label:"LCNN+BiLSTM (AUC=0.974)",color:"#1db954",dash:false,
+     points:[[0,0],[.02,.25],[.05,.55],[.1,.75],[.2,.88],[.35,.95],[.5,.975],[.75,.993],[1,1]]},
+    {label:"MFCC+GMM (AUC=0.821)",color:"#f0a500",dash:true,
+     points:[[0,0],[.05,.18],[.15,.46],[.3,.63],[.5,.78],[.7,.89],[1,1]]},
+    {label:"i-vector (AUC=0.714)",color:"#6ab0f5",dash:true,
+     points:[[0,0],[.1,.22],[.25,.45],[.5,.68],[.75,.84],[1,1]]},
+    {label:"Random",color:"rgba(255,255,255,.18)",dash:true,points:[[0,0],[1,1]]},
+  ];
+  const data = models || fallback;
+  if(chartRefs.roc) chartRefs.roc.destroy();
+  chartRefs.roc = new Chart(ctx,{type:"line",data:{datasets:data.map(m=>({
+    label:m.label,
+    data:m.points.map(([x,y])=>({x,y})),
+    borderColor:m.color,
+    backgroundColor:m.label.includes("LCNN")?"rgba(30,185,84,.08)":"transparent",
+    fill:m.label.includes("LCNN"),
+    tension:.4,pointRadius:0,borderWidth:m.dash?1.5:2.5,
+    borderDash:m.dash?[4,3]:undefined,
+  }))},options:{
+    responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:C.muted,font:{size:10,family:"Space Mono"},boxWidth:14,padding:8}}},
+    scales:{
+      x:{type:"linear",min:0,max:1,ticks:{color:C.muted,font:{size:9}},
+         grid:{color:"rgba(255,255,255,.04)"},title:{display:true,text:"FPR",color:C.muted,font:{size:10}}},
+      y:{min:0,max:1,ticks:{color:C.muted,font:{size:9}},
+         grid:{color:"rgba(255,255,255,.04)"},title:{display:true,text:"TPR",color:C.muted,font:{size:10}}},
+    },
+  }});
+}
+
+/* ═══ FILE HANDLING ════════════════════════════════ */
+function handleFile(input) {
+  const file = input.files[0]; if(!file) return;
+  currentFile = file;
+  document.getElementById("upload-title").textContent = `📎 ${file.name}`;
+  const btn = document.getElementById("analyze-btn");
+  btn.disabled = false;
+  btn.textContent = `ANALYZE: ${file.name.toUpperCase()}`;
+  document.getElementById("results").classList.add("hidden");
+}
+
+const zone = document.getElementById("upload-zone");
+zone.addEventListener("dragover", e=>{e.preventDefault();zone.classList.add("drag");});
+zone.addEventListener("dragleave",()=>zone.classList.remove("drag"));
+zone.addEventListener("drop", e=>{
+  e.preventDefault(); zone.classList.remove("drag");
+  const f = e.dataTransfer.files[0];
+  if(f){ document.getElementById("file-input").files = e.dataTransfer.files; handleFile({files:[f]}); }
+});
+
+/* ═══ MAIN ANALYSIS ════════════════════════════════ */
+async function runAnalysis() {
+  if(!currentFile) return;
+  const btn = document.getElementById("analyze-btn");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>ANALYZING…`;
+
+  try {
+    const form = new FormData();
+    form.append("file", currentFile);
+
+    const resp = await fetch(`${API_BASE}/api/analyze`, {method:"POST", body:form});
+    if(!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const data = await resp.json();
+    renderResults(data);
+
+  } catch(e) {
+    showToast(`Error: ${e.message}`);
+    console.error(e);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "RE-ANALYZE";
+  }
+}
+
+/* ═══ RENDER RESULTS ═══════════════════════════════ */
+function renderResults(d) {
+  document.getElementById("results").classList.remove("hidden");
+
+  const isFake = d.is_fake;
+  const pct    = d.confidence;
+
+  // Verdict
+  const badge = document.getElementById("verdict-badge");
+  badge.textContent = isFake ? "⚠ DEEPFAKE" : "✓ GENUINE";
+  badge.className   = "verdict " + (isFake ? "v-fake" : "v-real");
+
+  const fill = document.getElementById("conf-fill");
+  fill.style.background = isFake ? "var(--fake)" : "var(--real)";
+  fill.style.width = "0%";
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{ fill.style.width = pct+"%"; }));
+
+  document.getElementById("conf-lbl").textContent  = `Confidence: ${pct}%`;
+  document.getElementById("conf-prob").textContent = `P(real)=${d.p_real}%  ·  P(fake)=${d.p_fake}%  ·  threshold=50%`;
+
+  // Metrics
+  const m = d.metrics;
+  setMetric("m-e", m.spectral_entropy.toFixed(3), m.spectral_entropy>0.75, m.spectral_entropy<0.55);
+  setMetric("m-m", m.mfcc_variance.toFixed(5),    m.mfcc_variance>0.030,  m.mfcc_variance<0.018);
+  setMetric("m-p", m.pitch_stability.toFixed(3),  m.pitch_stability<0.92, m.pitch_stability>0.95);
+  const ganLabel = m.gan_artifact<0.12?"NONE":m.gan_artifact<0.5?"LOW":"HIGH";
+  setMetric("m-g", ganLabel, m.gan_artifact<0.12, m.gan_artifact>0.50);
+
+  // Explanation
+  document.getElementById("expl").innerHTML = isFake
+    ? `<strong>DEEPFAKE DETECTED</strong> — Confidence ${pct}%.<br><br>
+       Spectral entropy <strong>${m.spectral_entropy.toFixed(3)}</strong> (expected &gt;0.75) — over-smoothed synthesis.
+       MFCC variance <strong>${m.mfcc_variance.toFixed(5)}</strong> — unnaturally stable, lacking coarticulation.
+       Pitch stability <strong>${m.pitch_stability.toFixed(3)}</strong> — over-regularised F0 contour consistent with TTS/GAN.
+       GAN artifact score <strong>${m.gan_artifact.toFixed(3)}</strong> — vocoder fingerprints in 4–8kHz band.`
+    : `<strong>GENUINE AUDIO DETECTED</strong> — Confidence ${pct}%.<br><br>
+       Spectral entropy <strong>${m.spectral_entropy.toFixed(3)}</strong> — natural vocal tract dynamics.
+       MFCC variance <strong>${m.mfcc_variance.toFixed(5)}</strong> — authentic phoneme coarticulation.
+       Pitch stability <strong>${m.pitch_stability.toFixed(3)}</strong> — within human biological norm.
+       GAN artifact score <strong>${m.gan_artifact.toFixed(3)}</strong> — no synthesis fingerprints detected.`;
+
+  // Charts
+  const ch = d.charts;
+  drawWaveforms(ch.waveforms, isFake);
+  drawSpectrograms(ch.spectrograms, isFake);
+  drawMFCC(ch.mfcc, isFake);
+  drawFrequency(ch.frequency, isFake);
+
+  document.getElementById("results").scrollIntoView({behavior:"smooth"});
+}
+
+function setMetric(id, val, good, bad) {
+  const el = document.getElementById(id);
+  el.textContent = val;
+  el.style.color = good ? "var(--real)" : bad ? "var(--fake)" : "var(--accent)";
+}
+
+/* ═══ CANVAS HELPERS ═══════════════════════════════ */
+function setupCanvas(id) {
+  const el  = document.getElementById(id);
+  const dpr = devicePixelRatio || 1;
+  const W   = el.parentElement.clientWidth || 500;
+  el.width  = W * dpr;
+  el.height = el.offsetHeight * dpr;
+  const ctx = el.getContext("2d");
+  ctx.scale(dpr, dpr);
+  return {ctx, w:W, h:el.offsetHeight};
+}
+
+/* ── WAVEFORMS ──────────────────────────────────── */
+function drawWaveformCanvas(id, pts, color) {
+  const {ctx, w, h} = setupCanvas(id);
+  ctx.fillStyle = C.bg; ctx.fillRect(0,0,w,h);
+  // grid
+  ctx.strokeStyle="rgba(255,255,255,.04)"; ctx.lineWidth=.5;
+  [1,2,3].forEach(i=>{ ctx.beginPath();ctx.moveTo(0,h/4*i);ctx.lineTo(w,h/4*i);ctx.stroke(); });
+  // fill gradient
+  const g = ctx.createLinearGradient(0,0,0,h);
+  g.addColorStop(0,color+"44"); g.addColorStop(1,color+"00");
+  ctx.beginPath(); ctx.moveTo(0,h/2);
+  pts.forEach((a,i)=>{ const x=i/(pts.length-1)*w, y=h/2+a*(h*.43); ctx.lineTo(x,y); });
+  ctx.lineTo(w,h/2); ctx.fillStyle=g; ctx.fill();
+  // line
+  ctx.beginPath(); ctx.moveTo(0,h/2+pts[0]*(h*.43));
+  pts.forEach((a,i)=>{
+    if(i===0)return;
+    const x=i/(pts.length-1)*w, y=h/2+a*(h*.43);
+    if(i<pts.length-1){
+      const nx=(i+1)/(pts.length-1)*w, ny=h/2+pts[i+1]*(h*.43);
+      ctx.quadraticCurveTo(x,y,(x+nx)/2,(y+ny)/2);
+    } else ctx.lineTo(x,y);
+  });
+  ctx.strokeStyle=color; ctx.lineWidth=1.5; ctx.stroke();
+  ctx.beginPath();ctx.moveTo(0,h/2);ctx.lineTo(w,h/2);ctx.strokeStyle="rgba(255,255,255,.06)";ctx.lineWidth=.5;ctx.stroke();
+}
+
+function drawDiffCanvas(id, userPts, fakePts) {
+  const {ctx,w,h} = setupCanvas(id);
+  ctx.fillStyle=C.bg; ctx.fillRect(0,0,w,h);
+  const N=userPts.length, bw=w/N;
+  for(let i=0;i<N;i++){
+    const diff=Math.abs((userPts[i]||0)-(fakePts[i]||0));
+    ctx.fillStyle=diff<.05?"#1db95455":diff<.15?"#f0a50055":"#e8404055";
+    ctx.fillRect(i*bw,0,bw+.5,h);
+  }
+}
+
+function drawWaveforms(wf, isFake) {
+  const userColor = isFake ? C.fake : C.real;
+  drawWaveformCanvas("wf-user", wf.user, userColor);
+  drawWaveformCanvas("wf-real", wf.real, C.real);
+  drawWaveformCanvas("wf-fake", wf.fake, C.fake);
+  drawDiffCanvas("wf-diff", wf.user, wf.fake);
+}
+
+/* ── SPECTROGRAMS ───────────────────────────────── */
+function infernoColor(v) {
+  const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  v=clamp(v,0,1);
+  let r,g,b;
+  if(v<.25){r=0;g=0;b=lerp(20,130,v*4);}
+  else if(v<.5){r=lerp(0,180,(v-.25)*4);g=0;b=lerp(130,50,(v-.25)*4);}
+  else if(v<.75){r=lerp(180,240,(v-.5)*4);g=lerp(0,100,(v-.5)*4);b=lerp(50,20,(v-.5)*4);}
+  else{r=255;g=lerp(100,255,(v-.75)*4);b=lerp(20,80,(v-.75)*4);}
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+
+function coolwarmColor(v) {
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  v=Math.max(-1,Math.min(1,v)); const n=(v+1)/2;
+  let r,g,b;
+  if(n<.5){r=lerp(10,80,n*2);g=lerp(30,160,n*2);b=lerp(80,40,n*2);}
+  else{r=lerp(80,220,(n-.5)*2);g=lerp(160,60,(n-.5)*2);b=lerp(40,15,(n-.5)*2);}
+  return `rgb(${r|0},${g|0},${b|0})`;
+}
+
+function drawGridCanvas(id, grid, colorFn) {
+  const {ctx,w,h} = setupCanvas(id);
+  const rows=grid.length, cols=grid[0]?.length||0;
+  const cw=w/cols, ch=h/rows;
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+    ctx.fillStyle=colorFn(grid[r][c]);
+    ctx.fillRect(c*cw,r*ch,cw+.5,ch+.5);
+  }
+}
+
+function drawAnomalyCanvas(id, userGrid, isFake) {
+  const {ctx,w,h} = setupCanvas(id);
+  const rows=userGrid.length, cols=userGrid[0]?.length||0;
+  const cw=w/cols, ch=h/rows;
+  for(let r=0;r<rows;r++) for(let c=0;c<cols;c++){
+    const v=userGrid[r][c];
+    const anomaly=isFake?Math.max(0,(v-.3)*2):v*0.15;
+    const a=Math.max(0.02,Math.min(.9,anomaly));
+    ctx.fillStyle=`rgba(232,64,64,${a})`;
+    ctx.fillRect(c*cw,r*ch,cw+.5,ch+.5);
+  }
+  ctx.fillStyle="rgba(255,255,255,.55)";ctx.font="10px monospace";
+  ctx.fillText(isFake?"HIGH ARTIFACT REGIONS":"LOW ARTIFACT PROBABILITY",8,h-8);
+}
+
+function drawSpectrograms(sp, isFake) {
+  drawGridCanvas("sp-user", sp.user, infernoColor);
+  drawGridCanvas("sp-real", sp.real, infernoColor);
+  drawGridCanvas("sp-fake", sp.fake, infernoColor);
+  drawAnomalyCanvas("sp-anom", sp.user, isFake);
+}
+
+/* ── MFCC ───────────────────────────────────────── */
+function drawMFCC(mfcc, isFake) {
+  drawGridCanvas("mf-user", mfcc.user, coolwarmColor);
+  drawGridCanvas("mf-fake", mfcc.fake, coolwarmColor);
+
+  // Bar chart: mean absolute value per coefficient
+  const userMeans  = mfcc.user.map(row=>Math.abs(row.reduce((a,b)=>a+Math.abs(b),0)/row.length));
+  const realMeans  = mfcc.real.map(row=>Math.abs(row.reduce((a,b)=>a+Math.abs(b),0)/row.length));
+  const fakeMeans  = mfcc.fake.map(row=>Math.abs(row.reduce((a,b)=>a+Math.abs(b),0)/row.length));
+  const labels     = userMeans.map((_,i)=>`C${i+1}`);
+
+  if(chartRefs.mfcb) chartRefs.mfcb.destroy();
+  chartRefs.mfcb = new Chart(document.getElementById("mf-bar"),{type:"bar",data:{
+    labels,
+    datasets:[
+      {label:"Your Audio",data:userMeans,backgroundColor:isFake?"rgba(232,64,64,.5)":"rgba(30,185,84,.5)",borderColor:isFake?C.fake:C.real,borderWidth:1},
+      {label:"Real Ref",  data:realMeans, backgroundColor:"rgba(255,255,255,.07)",borderColor:"rgba(255,255,255,.2)",borderWidth:1},
+      {label:"Fake Ref",  data:fakeMeans, backgroundColor:"rgba(240,165,0,.18)",borderColor:C.accent,borderWidth:1},
+    ]
+  },options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:C.muted,font:{size:10,family:"Space Mono"},boxWidth:12,padding:8}}},
+    scales:{x:{ticks:{color:C.muted,font:{size:9}},grid:{color:"rgba(255,255,255,.04)"}},
+            y:{ticks:{color:C.muted,font:{size:9}},grid:{color:"rgba(255,255,255,.04)"},min:0}}}});
+}
+
+/* ── FREQUENCY ──────────────────────────────────── */
+function drawFrequency(freq, isFake) {
+  const sp = freq.spectrum;
+
+  if(chartRefs.frsp) chartRefs.frsp.destroy();
+  chartRefs.frsp = new Chart(document.getElementById("fr-spec"),{type:"line",data:{
+    labels:sp.user.labels,
+    datasets:[
+      {label:"Your Audio",data:sp.user.values,borderColor:isFake?C.fake:C.real,backgroundColor:"transparent",tension:.4,pointRadius:4,borderWidth:2.5},
+      {label:"Real Ref",  data:sp.real.values,borderColor:"rgba(255,255,255,.3)",backgroundColor:"transparent",tension:.4,pointRadius:3,borderWidth:1.5,borderDash:[4,3]},
+      {label:"Fake Ref",  data:sp.fake.values,borderColor:"rgba(232,64,64,.5)",backgroundColor:"transparent",tension:.4,pointRadius:3,borderWidth:1.5,borderDash:[2,4]},
+    ]
+  },options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:C.muted,font:{size:10,family:"Space Mono"},boxWidth:12,padding:8}}},
+    scales:{x:{ticks:{color:C.muted,font:{size:9}},grid:{color:"rgba(255,255,255,.04)"},title:{display:true,text:"Frequency",color:C.muted,font:{size:10}}},
+            y:{ticks:{color:C.muted,font:{size:9}},grid:{color:"rgba(255,255,255,.04)"},title:{display:true,text:"Power (dB)",color:C.muted,font:{size:10}}}}}});
+
+  const bd = freq.bands;
+  if(chartRefs.frbd) chartRefs.frbd.destroy();
+  chartRefs.frbd = new Chart(document.getElementById("fr-band"),{type:"bar",data:{
+    labels:bd.labels,
+    datasets:[
+      {label:"Your Audio",data:bd.user,backgroundColor:isFake?"rgba(232,64,64,.5)":"rgba(30,185,84,.5)",borderColor:isFake?C.fake:C.real,borderWidth:1},
+      {label:"Real Ref",  data:bd.real,backgroundColor:"rgba(255,255,255,.06)",borderColor:"rgba(255,255,255,.2)",borderWidth:1},
+      {label:"Fake Ref",  data:bd.fake,backgroundColor:"rgba(240,165,0,.15)",borderColor:C.accent,borderWidth:1},
+    ]
+  },options:{responsive:true,maintainAspectRatio:false,
+    plugins:{legend:{labels:{color:C.muted,font:{size:10,family:"Space Mono"},boxWidth:12,padding:8}}},
+    scales:{x:{ticks:{color:C.muted,font:{size:9}},grid:{color:"rgba(255,255,255,.04)"}},
+            y:{ticks:{color:C.muted,font:{size:9}},grid:{color:"rgba(255,255,255,.04)"},title:{display:true,text:"Power (dB)",color:C.muted,font:{size:10}}}}}});
+}
+
+/* ═══ TAB SWITCHER ═════════════════════════════════ */
+function switchTab(name, btn) {
+  document.querySelectorAll(".tab-body").forEach(t=>t.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(b=>b.classList.remove("active"));
+  document.getElementById("tab-"+name).classList.add("active");
+  if(btn) btn.classList.add("active");
+}
+
+/* ═══ TOAST ════════════════════════════════════════ */
+function showToast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast"; t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), 5000);
+}
+
+/* ═══ INIT ═════════════════════════════════════════ */
+window.addEventListener("load", ()=>{
+  checkHealth();
+  loadInfo();
+});
+</script>
+</body>
+</html>

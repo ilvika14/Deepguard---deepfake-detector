@@ -1,1 +1,0 @@
-# Deepguard---deepfake-detector

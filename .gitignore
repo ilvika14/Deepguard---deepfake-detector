@@ -1,0 +1,30 @@
+# Python
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.env.*
+
+# Model weights (use Git LFS for these, or add manually)
+# checkpoints/*.pt   ← uncomment this if you DON'T want to commit weights
+
+# Data
+data/
+results/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Node (if you add a build step later)
+node_modules/
+dist/
+.next/
+
+# Logs
+*.log
