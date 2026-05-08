@@ -8,4 +8,4 @@ scipy==1.12.0
 soundfile==0.12.1
 torch==2.2.1
 torchaudio==2.2.1
-scikit-learn==1.4.1
+scikit-learn>=1.4.2
