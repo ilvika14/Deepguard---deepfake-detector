@@ -3,7 +3,7 @@ uvicorn==0.27.1
 python-multipart==0.0.9
 
 numpy==1.26.4
-scipy==1.12.0
+scipy==1.11.4
 librosa==0.10.1
 soundfile==0.12.1
 scikit-learn==1.4.2
@@ -12,3 +12,4 @@ scikit-learn==1.4.2
 
 torch==2.2.1+cpu
 torchaudio==2.2.1+cpu
+mangum==0.1.0
