@@ -330,7 +330,7 @@ canvas{display:block;width:100%}
    CONFIG — change API_BASE for local dev vs production
 ═══════════════════════════════════════════════════ */
 const API_BASE = "";   // empty = same origin (works on Vercel)
-// For local dev set: const API_BASE = "http://localhost:8000";
+// For local dev set: const API_BASE = "";
 
 const C = {
   real:"#1db954", fake:"#e84040", accent:"#f0a500",
@@ -456,7 +456,7 @@ async function runAnalysis() {
     const form = new FormData();
     form.append("file", currentFile);
 
-    const resp = await fetch(`${API_BASE}/api/analyze`, {method:"POST", body:form});
+    const resp = await fetch('https://deepguard-3glz.onrender.com/api/analyze', {method:"POST", body:form});
     if(!resp.ok) {
       const err = await resp.json();
       throw new Error(err.detail || `HTTP ${resp.status}`);
